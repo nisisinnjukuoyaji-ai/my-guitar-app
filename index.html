@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111114">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="機材管理">
+  <title>ギター機材管理</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-top">
+      <h1>機材管理</h1>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.2 4.2-1.4 1.4-4.2-4.2A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z"/></svg>
+      <input id="search" type="search" placeholder="メーカー・モデル名で検索" autocomplete="off">
+    </div>
+  </header>
+
+  <main id="list" class="list" aria-live="polite"></main>
+
+  <button id="addBtn" class="fab" aria-label="機材を追加">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+  </button>
+
+  <nav class="tabbar" id="tabbar" aria-label="カテゴリ"></nav>
+
+  <!-- 登録・編集シート -->
+  <div class="sheet-backdrop" id="backdrop" hidden></div>
+  <section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+    <form id="form" novalidate>
+      <div class="sheet-header">
+        <button type="button" class="link" id="cancelBtn">キャンセル</button>
+        <h2 id="sheetTitle">機材を追加</h2>
+        <button type="submit" class="link strong">保存</button>
+      </div>
+      <div class="sheet-body">
+        <div class="segment" id="categorySegment" role="radiogroup" aria-label="カテゴリ"></div>
+
+        <div class="group">
+          <label class="row">
+            <span>メーカー</span>
+            <input name="brand" placeholder="例: Fender" autocomplete="off">
+          </label>
+          <label class="row">
+            <span>モデル名<em>*</em></span>
+            <input name="model" placeholder="例: Stratocaster" autocomplete="off" required>
+          </label>
+          <label class="row">
+            <span>種類</span>
+            <select name="type" id="typeSelect"></select>
+          </label>
+        </div>
+
+        <div class="group">
+          <label class="row">
+            <span>状態</span>
+            <select name="status">
+              <option value="active">使用中</option>
+              <option value="stored">保管中</option>
+              <option value="repair">修理中</option>
+              <option value="sold">売却済み</option>
+            </select>
+          </label>
+          <label class="row">
+            <span>購入日</span>
+            <input name="purchaseDate" type="date">
+          </label>
+          <label class="row">
+            <span>購入価格</span>
+            <input name="price" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="円">
+          </label>
+          <label class="row">
+            <span>シリアル</span>
+            <input name="serial" autocomplete="off" autocapitalize="characters">
+          </label>
+        </div>
+
+        <div class="group">
+          <label class="row col">
+            <span>メモ</span>
+            <textarea name="notes" rows="4" placeholder="弦のゲージ、セッティング、修理履歴など"></textarea>
+          </label>
+        </div>
+
+        <p class="error" id="formError" hidden></p>
+
+        <button type="button" class="danger" id="deleteBtn" hidden>この機材を削除</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- 削除確認 -->
+  <div class="alert-backdrop" id="confirm" hidden>
+    <div class="alert" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <h3 id="confirmTitle">削除しますか？</h3>
+      <p id="confirmText"></p>
+      <div class="alert-actions">
+        <button type="button" id="confirmCancel">キャンセル</button>
+        <button type="button" id="confirmOk" class="destructive">削除</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
