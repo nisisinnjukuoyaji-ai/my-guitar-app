@@ -18,6 +18,9 @@ python3 -m http.server 8000
 ```
 
 ブラウザで http://localhost:8000 を開きます。
-GitHub Pages などで公開し、iPhone の Safari で開いて「共有 → ホーム画面に追加」するとアプリのように全画面で使えます。
+
+公開版（GitHub Pages）: https://nisisinnjukuoyaji-ai.github.io/my-guitar-app/
+
+iPhone の Safari で開いて「共有 → ホーム画面に追加」するとアプリのように全画面で使えます。
 
 > データはその端末・そのブラウザの中だけに保存されます。別の端末とは共有されません。
