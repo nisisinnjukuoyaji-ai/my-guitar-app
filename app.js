@@ -68,6 +68,10 @@
   const formError = $('#formError');
   const deleteBtn = $('#deleteBtn');
   const confirmEl = $('#confirm');
+  const photoPreview = $('#photoPreview');
+  const photoImg = $('#photoImg');
+  const aiBtn = $('#aiBtn');
+  const aiStatus = $('#aiStatus');
 
   // ===== DOM helpers =====
   function el(tag, attrs = {}, children = []) {
@@ -121,7 +125,8 @@
 
   function matches(item) {
     if (!query) return true;
-    const hay = [item.brand, item.model, item.type, item.serial, item.notes].join(' ').toLowerCase();
+    const hay = [item.brand, item.model, item.modelNumber, item.type, item.color, item.features, item.serial, item.notes]
+      .join(' ').toLowerCase();
     return query.toLowerCase().split(/\s+/).every(q => hay.includes(q));
   }
 
@@ -129,11 +134,31 @@
     return (a.brand || '').localeCompare(b.brand || '', 'ja') || a.model.localeCompare(b.model, 'ja');
   }
 
+  // 一覧のサムネイル（IndexedDB の写真から作った URL をキャッシュ）
+  const thumbUrls = new Map();
+  function thumbUrl(id) {
+    if (!thumbUrls.has(id)) {
+      thumbUrls.set(id, PhotoStore.get(id).then(blob => (blob ? URL.createObjectURL(blob) : null)).catch(() => null));
+    }
+    return thumbUrls.get(id);
+  }
+  function dropThumb(id) {
+    const p = thumbUrls.get(id);
+    thumbUrls.delete(id);
+    if (p) p.then(url => url && URL.revokeObjectURL(url));
+  }
+
   function card(item) {
-    const sub = [item.type, item.price ? yen(item.price) : '', item.purchaseDate ? item.purchaseDate.slice(0, 4) + '年' : '']
+    const sub = [item.modelNumber, item.type, item.price ? yen(item.price) : '', item.purchaseDate ? item.purchaseDate.slice(0, 4) + '年' : '']
       .filter(Boolean).join(' · ');
+    const iconEl = el('div', { class: `card-icon cat-${item.category}` }, [icon(item.category)]);
+    if (item.hasPhoto) {
+      thumbUrl(item.id).then(url => {
+        if (url) iconEl.replaceChildren(el('img', { src: url, alt: '' }));
+      });
+    }
     return el('button', { class: 'card', type: 'button', onclick: () => openSheet(item) }, [
-      el('div', { class: `card-icon cat-${item.category}` }, [icon(item.category)]),
+      iconEl,
       el('div', { class: 'card-main' }, [
         el('div', { class: 'card-title', text: [item.brand, item.model].filter(Boolean).join(' ') }),
         el('div', { class: 'card-sub', text: sub || CAT_BY_ID[item.category].label }),
@@ -180,6 +205,8 @@
     // 既存データの種類がリストにない場合も残す
     if (keepType && !types.includes(keepType)) typeSelect.append(el('option', { value: keepType, text: keepType }));
     typeSelect.value = keepType || '';
+    clearMark('type');
+    removeSuggest('type');
   }
 
   segment.replaceChildren(...CATEGORIES.map(c => el('button', {
@@ -187,31 +214,40 @@
     role: 'radio',
     'data-cat': c.id,
     text: c.label,
-    onclick: () => setFormCategory(c.id),
+    onclick: () => {
+      setFormCategory(c.id);
+      removeSuggest('category');
+      if (lastAi) applyType(lastAi.type);
+    },
   })));
+
+  const TEXT_FIELDS = ['brand', 'model', 'modelNumber', 'color', 'purchaseDate', 'serial', 'features', 'notes'];
 
   function openSheet(item) {
     editingId = item ? item.id : null;
     form.reset();
     formError.hidden = true;
+    resetPhoto();
+    clearAi();
     $('#sheetTitle').textContent = item ? '機材を編集' : '機材を追加';
     deleteBtn.hidden = !item;
 
     const cat = item ? item.category : (currentTab === 'all' ? 'guitar' : currentTab);
     setFormCategory(cat, item && item.type);
     if (item) {
-      for (const name of ['brand', 'model', 'status', 'purchaseDate', 'serial', 'notes']) {
-        form.elements[name].value = item[name] || '';
-      }
+      for (const name of TEXT_FIELDS) form.elements[name].value = item[name] || '';
       form.elements.status.value = item.status || 'active';
       form.elements.price.value = item.price ? String(item.price) : '';
+      if (item.hasPhoto) {
+        const id = item.id;
+        PhotoStore.get(id).then(blob => { if (blob && editingId === id && !pendingPhoto) showPreview(blob); }).catch(() => {});
+      }
     }
 
     backdrop.hidden = false;
     sheet.hidden = false;
     document.body.classList.add('locked');
     sheet.querySelector('.sheet-body').scrollTop = 0;
-    if (!item) setTimeout(() => form.elements.brand.focus(), 300);
   }
 
   function closeSheet() {
@@ -219,6 +255,8 @@
     backdrop.hidden = true;
     document.body.classList.remove('locked');
     editingId = null;
+    resetPhoto();
+    clearAi();
   }
 
   form.elements.price.addEventListener('input', e => {
@@ -227,7 +265,198 @@
     if (v !== e.target.value) e.target.value = v;
   });
 
-  form.addEventListener('submit', e => {
+  // ===== Photo =====
+  let pendingPhoto = null; // 新しく撮影・選択した写真（保存時に IndexedDB へ書く）
+  let photoRemoved = false;
+  let previewUrl = null;
+
+  function showPreview(blob) {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(blob);
+    photoImg.src = previewUrl;
+    photoPreview.hidden = false;
+    aiBtn.hidden = !GearAI.enabled;
+  }
+
+  function resetPhoto() {
+    pendingPhoto = null;
+    photoRemoved = false;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+    photoImg.removeAttribute('src');
+    photoPreview.hidden = true;
+    aiBtn.hidden = true;
+  }
+
+  async function onPhotoPicked(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      pendingPhoto = await PhotoStore.resize(file);
+    } catch (err) {
+      toast(err.message || '写真を読み込めませんでした');
+      return;
+    }
+    photoRemoved = false;
+    showPreview(pendingPhoto);
+    if (GearAI.enabled) {
+      runAi();
+    } else {
+      setAiStatus('AI判定は未設定です（写真は保存できます）', 'muted');
+    }
+  }
+
+  $('#photoCamera').addEventListener('change', onPhotoPicked);
+  $('#photoLibrary').addEventListener('change', onPhotoPicked);
+  $('#photoRemove').addEventListener('click', () => {
+    resetPhoto();
+    clearAi();
+    photoRemoved = true;
+  });
+
+  // ===== AI 判定 =====
+  // 確信度 high: 自動入力 / medium: 自動入力して「要確認」表示 / low: 空欄のまま「候補」として表示
+  let aiRun = 0; // 古い判定結果が後から届いても反映しないための連番
+  let lastAi = null;
+
+  function setAiStatus(text, kind) {
+    aiStatus.textContent = text;
+    aiStatus.className = `ai-status ${kind || ''}`;
+    aiStatus.hidden = !text;
+  }
+
+  function rowOf(name) {
+    return name === 'category' ? segment : form.elements[name].closest('.row');
+  }
+
+  function clearMark(name) {
+    const field = form.elements[name];
+    if (field) delete field.dataset.ai;
+    const row = rowOf(name);
+    const badge = row && row.querySelector('.ai-badge');
+    if (badge) badge.remove();
+  }
+
+  function mark(name, confidence) {
+    clearMark(name);
+    form.elements[name].dataset.ai = confidence;
+    rowOf(name).querySelector('span').append(el('i', {
+      class: `ai-badge ${confidence}`,
+      text: confidence === 'high' ? 'AI' : '要確認',
+    }));
+  }
+
+  function removeSuggest(name) {
+    const old = form.querySelector(`.suggest[data-for="${name}"]`);
+    if (old) old.remove();
+  }
+
+  function suggest(name, values, labelOf, onPick) {
+    removeSuggest(name);
+    const list = [...new Set(values.filter(Boolean))];
+    if (!list.length) return;
+    rowOf(name).after(el('div', { class: 'suggest', 'data-for': name }, [
+      el('span', { text: '候補' }),
+      ...list.map(v => el('button', {
+        type: 'button',
+        class: 'chip',
+        text: labelOf(v),
+        onclick: () => { onPick(v); removeSuggest(name); },
+      })),
+    ]));
+  }
+
+  // ユーザーが自分で入力した欄は上書きせず、候補として出すだけにする
+  function applyGuess(name, g) {
+    const field = form.elements[name];
+    const userValue = field.value.trim() && !field.dataset.ai;
+    const canSet = v => (field.tagName !== 'SELECT' || [...field.options].some(o => o.value === v));
+    const pick = v => { field.value = v; clearMark(name); };
+
+    if (!userValue && g.value && g.confidence !== 'low' && canSet(g.value)) {
+      field.value = g.value;
+      mark(name, g.confidence);
+      suggest(name, g.candidates.filter(canSet), v => v, pick);
+    } else {
+      if (!userValue && field.dataset.ai) { field.value = ''; clearMark(name); }
+      suggest(name, [g.value, ...g.candidates].filter(v => v && v !== field.value && canSet(v)), v => v, pick);
+    }
+  }
+
+  function applyType(g) {
+    if (g) applyGuess('type', g);
+  }
+
+  function applyAi(r) {
+    lastAi = r;
+    const cat = r.category;
+    if (cat.value && cat.confidence !== 'low' && !editingId) {
+      if (cat.value !== formCategory) setFormCategory(cat.value);
+      suggest('category', cat.candidates, id => CAT_BY_ID[id].label, id => { setFormCategory(id); applyType(r.type); });
+    } else {
+      // 既存の機材のカテゴリや、自信のない判定は勝手に変えない
+      const options = [cat.value, ...cat.candidates].filter(id => id && id !== formCategory && CAT_BY_ID[id]);
+      suggest('category', options, id => CAT_BY_ID[id].label, id => { setFormCategory(id); applyType(r.type); });
+    }
+    for (const name of ['brand', 'model', 'modelNumber', 'color']) applyGuess(name, r[name]);
+    applyType(r.type);
+
+    const features = form.elements.features;
+    if (r.features.length && (!features.value.trim() || features.dataset.ai)) {
+      features.value = r.features.join('、');
+      mark('features', 'medium');
+    }
+  }
+
+  function clearAi() {
+    aiRun++;
+    lastAi = null;
+    form.querySelectorAll('.suggest').forEach(n => n.remove());
+    for (const name of ['category', 'brand', 'model', 'modelNumber', 'color', 'type', 'features']) clearMark(name);
+    aiBtn.disabled = false;
+    aiBtn.classList.remove('loading');
+    setAiStatus('');
+  }
+
+  async function runAi() {
+    const blob = pendingPhoto || (previewUrl && (await fetch(previewUrl).then(r => r.blob()).catch(() => null)));
+    if (!blob) return;
+    const run = ++aiRun;
+    aiBtn.disabled = true;
+    aiBtn.classList.add('loading');
+    setAiStatus('写真を解析しています…', 'busy');
+    try {
+      const { result, quota } = await GearAI.identify(blob);
+      if (run !== aiRun) return;
+      if (!result.isGear) {
+        setAiStatus('ギター機材が写っていないようです。別の写真でお試しください', 'warn');
+        return;
+      }
+      applyAi(result);
+      const rest = quota ? `（本日あと${quota.remaining}回）` : '';
+      setAiStatus(`AIの推定を入力しました。内容を確認してから保存してください${rest}` + (result.evidence ? `\n根拠: ${result.evidence}` : ''), 'done');
+    } catch (err) {
+      if (run !== aiRun) return;
+      setAiStatus(err.message || 'AI判定に失敗しました', 'warn');
+    } finally {
+      if (run === aiRun) {
+        aiBtn.disabled = false;
+        aiBtn.classList.remove('loading');
+      }
+    }
+  }
+
+  aiBtn.addEventListener('click', runAi);
+
+  // 手で編集した欄は「確認済み」とみなして印を外す
+  form.addEventListener('input', e => { if (e.target.dataset && e.target.dataset.ai) clearMark(e.target.name); });
+  form.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.ai) clearMark(e.target.name); });
+
+  // ===== Save =====
+  const newId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+
+  form.addEventListener('submit', async e => {
     e.preventDefault();
     const f = form.elements;
     const model = f.model.value.trim();
@@ -243,23 +472,39 @@
       category: formCategory,
       brand: f.brand.value.trim(),
       model,
+      modelNumber: f.modelNumber.value.trim(),
       type: f.type.value,
+      color: f.color.value.trim(),
       status: f.status.value,
       purchaseDate: f.purchaseDate.value,
       price: f.price.value ? Number(f.price.value) : null,
       serial: f.serial.value.trim(),
+      features: f.features.value.trim(),
       notes: f.notes.value.trim(),
       updatedAt: now,
     };
 
     const isEdit = Boolean(editingId);
-    if (isEdit) {
-      items = items.map(i => (i.id === editingId ? { ...i, ...data } : i));
-    } else {
-      const id = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
-      items = [...items, { id, createdAt: now, ...data }];
+    const id = editingId || newId();
+    try {
+      if (pendingPhoto) {
+        await PhotoStore.put(id, pendingPhoto);
+        data.hasPhoto = true;
+      } else if (photoRemoved) {
+        await PhotoStore.remove(id);
+        data.hasPhoto = false;
+      }
+    } catch {
+      toast('写真を保存できませんでした');
+      return;
     }
-    if (!save()) return;
+    if (pendingPhoto || photoRemoved) dropThumb(id);
+
+    const prev = items;
+    items = isEdit
+      ? items.map(i => (i.id === id ? { ...i, ...data } : i))
+      : [...items, { id, createdAt: now, ...data }];
+    if (!save()) { items = prev; return; }
     closeSheet();
     renderList();
     toast(isEdit ? '更新しました' : '登録しました');
@@ -279,9 +524,12 @@
   $('#confirmCancel').addEventListener('click', () => { confirmEl.hidden = true; });
   confirmEl.addEventListener('click', e => { if (e.target === confirmEl) confirmEl.hidden = true; });
   $('#confirmOk').addEventListener('click', () => {
+    const id = editingId;
     const prev = items;
-    items = items.filter(i => i.id !== editingId);
+    items = items.filter(i => i.id !== id);
     if (!save()) { items = prev; return; }
+    PhotoStore.remove(id).catch(() => {});
+    dropThumb(id);
     confirmEl.hidden = true;
     closeSheet();
     renderList();

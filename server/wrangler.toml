@@ -1,0 +1,22 @@
+name = "guitar-gear-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# フロントエンドの公開URL（オリジン）。ローカル確認時は http://localhost:8000 も足す
+ALLOWED_ORIGINS = "https://nisisinnjukuoyaji-ai.github.io"
+CLAUDE_MODEL = "claude-opus-5-5"
+CLAUDE_EFFORT = "medium"
+FREE_DAILY_LIMIT = "10"
+PRO_DAILY_LIMIT = "200"
+
+# 日次の利用回数制限に使う KV。作成: npx wrangler kv namespace create USAGE
+# 出力された id で下の2行のコメントを外す（未設定でも動くが回数制限なし）
+# [[kv_namespaces]]
+# binding = "USAGE"
+# id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# 秘密情報は vars に書かず secret で設定する:
+#   npx wrangler secret put ANTHROPIC_API_KEY
+#   npx wrangler secret put IP_HASH_SALT
