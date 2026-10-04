@@ -300,11 +300,14 @@
     }
     photoRemoved = false;
     showPreview(pendingPhoto);
-    if (GearAI.enabled) {
-      runAi();
-    } else {
-      setAiStatus('AI判定は未設定です（写真は保存できます）', 'muted');
-    }
+    // 撮影・選択しただけでは解析しない。ユーザーが「AI判定」を押したときだけ送信する
+    aiRun++;
+    form.querySelectorAll('.suggest').forEach(n => n.remove());
+    aiBtn.disabled = false;
+    aiBtn.classList.remove('loading');
+    setAiStatus(GearAI.enabled
+      ? '「AI判定」を押すと、写真からメーカー・モデル名・種類などを推定します'
+      : 'AI判定は未設定です（写真は保存できます）', 'muted');
   }
 
   $('#photoCamera').addEventListener('change', onPhotoPicked);
